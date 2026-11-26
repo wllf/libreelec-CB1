@@ -64,6 +64,34 @@ bool dvbridge_hdr10_session_init(struct dvbridge_hdr10_session *out,
     return true;
 }
 
+bool dvbridge_hdr10_raw_session_init(struct dvbridge_hdr10_session *out,
+                                     const void *metadata, size_t bytes)
+{
+    struct dvbridge_hdr10_session candidate = {0};
+    if (!out || !dvbridge_hdr10_session_init(&candidate, metadata, bytes))
+        return false;
+    const AVDOVIColorMetadata *color = av_dovi_get_color(metadata);
+    const AVDOVIDmData *l6 = av_dovi_find_level(metadata, 6);
+    float black = color->source_min_pq <= 4095 ?
+        pl_hdr_rescale(PL_HDR_PQ, PL_HDR_NITS, color->source_min_pq / 4095.0f) : 0;
+    if (candidate.output.level6) {
+        black = l6->l6.min_luminance / 10000.0f;
+        /* Unmapped output keeps the source light levels, so they stay valid. */
+        if (l6->l6.max_cll <= 10000 && l6->l6.max_fall <= l6->l6.max_cll) {
+            candidate.output.max_cll = l6->l6.max_cll;
+            candidate.output.max_fall = l6->l6.max_fall;
+        }
+    }
+    if (!isfinite(black) || black < 0 || black >= candidate.target.hdr.max_luma)
+        black = 0;
+    candidate.target.hdr.min_luma = black > PL_COLOR_HDR_BLACK ? black : PL_COLOR_HDR_BLACK;
+    candidate.target.hdr.prim = *pl_raw_primaries_get(PL_COLOR_PRIM_BT_2020);
+    candidate.output.min_luminance = (unsigned)lroundf(black * 10000.0f);
+    candidate.raw = true;
+    *out = candidate;
+    return true;
+}
+
 bool dvbridge_map_color(struct dvbridge_color *out, const void *metadata,
                        size_t bytes, bool enhancement_layer_paired)
 {

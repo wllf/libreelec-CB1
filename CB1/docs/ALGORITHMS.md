@@ -121,6 +121,22 @@ Source MaxCLL/MaxFALL are not relabeled as measured output statistics.
 
 These are rendering coefficients, not user calibration measurements.
 
+## Dolby Vision to HDR10 Raw FEL composition
+
+**Purpose.** Hand the reconstructed Dolby Vision picture to an HDR10 display untouched, so the display performs all mapping.
+
+Reconstruction, FEL pairing, admission and HDMI handling are those of HDR10
+Rendering. The render target is the reconstructed BT.2020/PQ source space
+itself, with clip tone and gamut mappers and no scene metadata, so libplacebo
+applies no tone mapping, gamut compression or inverse expansion. The post-scale
+picture ceiling is PQ 1.0 rather than the static target peak.
+
+Static HDR10 signalling comes from the RPU: L6 maximum and minimum mastering
+luminance, or the source PQ range without L6. Because the output is the source
+signal, consistent L6 MaxCLL/MaxFALL are passed through; inconsistent or absent
+values are signalled as unknown (zero). Dynamic L1/L2/L8 metadata is not
+transmitted.
+
 ## Dolby Vision to LLDV Reference – HDR10 Output
 
 **Purpose.** Render Dolby Vision for a manually calibrated HDR10 screen using its configured peak, black level and gamut.

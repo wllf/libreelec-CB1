@@ -45,7 +45,8 @@ class RenderingLabelsTests(unittest.TestCase):
             'Dolby Vision : Master Reference', 'Dolby Vision : Reference',
             'Dolby Vision : Adaptive HDR Mapping', 'Kodi : Default',
             'HDR10 : Rendering', 'HDR10 : LLDV Reference conversion',
-            'HDR10+ : Conversion', 'SDR : Conversion', 'Dolby Vision : LLDV Reference'])
+            'HDR10+ : Conversion', 'SDR : Conversion', 'Dolby Vision : LLDV Reference',
+            'HDR10 : Raw FEL composition'])
         self.assertIn('CFileItem item(settingsMenu ? (gray ?',source)
         for key in ('dvbridge.outputmode','dvbridge.hdr10method'):
             self.assertEqual(settings.find(f".//setting[@id='{key}']").findtext('visible'),'false')

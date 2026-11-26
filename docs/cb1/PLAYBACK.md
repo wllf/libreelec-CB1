@@ -6,7 +6,7 @@ modes appear during playback. Unavailable modes show their blocking reason.
 
 | Source | Available processing |
 | --- | --- |
-| Dolby Vision | Reference, Master Reference, Adaptive HDR Mapping, HDR10 Rendering, HDR10 : LLDV Reference conversion, Dolby Vision : LLDV Reference, HDR10+ Rendering, SDR Rendering or Kodi default |
+| Dolby Vision | Reference, Master Reference, Adaptive HDR Mapping, HDR10 Rendering, HDR10 : Raw FEL composition, HDR10 : LLDV Reference conversion, Dolby Vision : LLDV Reference, HDR10+ Rendering, SDR Rendering or Kodi default |
 | HDR10 | Dolby Vision Rendering, Dolby Vision : Adaptive HDR Mapping, SDR Rendering or Kodi default |
 | HDR10+ | HDR10+ Native, Kodi default for ordinary HDR10, Dolby Vision Rendering or SDR Conversion |
 | HLG | HLG Native, Dolby Vision Rendering or SDR Conversion |

@@ -87,8 +87,9 @@ namespace DVBRIDGE {
 }
 using Capabilities=DVBRIDGE::OutputCapabilities;
 using Selection=DVBRIDGE::OutputSelection;
-struct dvbridge_hdr10_session {struct {unsigned max_luminance=1000,min_luminance=50,max_cll=1000,max_fall=400;bool level6=true;}output;struct {struct {float max_luma=1000;}hdr;}target;};
+struct dvbridge_hdr10_session {struct {unsigned max_luminance=1000,min_luminance=50,max_cll=1000,max_fall=400;bool level6=true;}output;struct {struct {float max_luma=1000;}hdr;}target;bool raw=false;};
 bool dvbridge_hdr10_session_init(dvbridge_hdr10_session*,const void*,size_t){return true;}
+bool dvbridge_hdr10_raw_session_init(dvbridge_hdr10_session* s,const void*,size_t){s->raw=true;return true;}
 struct CModeChangeHold{enum class Kind{START,STOP};};
 struct CDVWindowRetirement {static void PollOnce(){}};
 

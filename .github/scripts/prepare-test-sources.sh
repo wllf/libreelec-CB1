@@ -65,6 +65,10 @@ for patch_file in packages/multimedia/cb1-engine/patches/"$engine_revision"/*.pa
   patch --batch --forward --fuzz=0 -p1 -d "$test_root/engine" < "$patch_file"
 done
 tar -xf "$test_root/kodi-cb1.tar.gz" -C "$test_root/kodi" --strip-components=1
+# Test the Kodi source the image ships: the pinned fork plus local changes.
+for patch_file in packages/mediacenter/kodi/cb1-patches/*.patch; do
+  patch --batch --forward --fuzz=0 -p1 -d "$test_root/kodi" < "$patch_file"
+done
 tar -xf "$test_root/ffmpeg-cb1.tar.gz" -C "$test_root/ffmpeg" --strip-components=1
 tar -xf "$test_root/libplacebo.tar.gz" -C "$test_root/libplacebo" --strip-components=1
 tar -xf "$test_root/libbluray.tar.gz" -C "$test_root/libbluray" --strip-components=1

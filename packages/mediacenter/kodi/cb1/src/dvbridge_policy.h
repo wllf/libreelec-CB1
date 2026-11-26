@@ -52,7 +52,11 @@ struct dvbridge_policy {
     uint64_t lldv_edid_generation;
     unsigned lldv_edid_version;
     double lldv_primaries[6];
+    /* HDR10 Basic only: compose BL+EL and output it without tone or gamut
+     * mapping (dvbridge_hdr10_raw_session_init). Other modes ignore it. */
+    bool hdr10_raw;
 };
+#define DVBRIDGE_HDR10_RAW_POLICY_API 1
 struct dvbridge_identity { uint64_t stream, picture, revision; };
 enum dvbridge_policy_status {
     DVBRIDGE_POLICY_VALID, DVBRIDGE_POLICY_INVALID_VALUE, DVBRIDGE_POLICY_TV_PROFILE_REQUIRED

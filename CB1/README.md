@@ -30,6 +30,7 @@ source contains creative trims or that every output mode applies every field.
 | Dolby Vision | Dolby Vision Master Reference | Dolby Vision, TV-Led | Reference reconstruction, aiming for bit-perfect playback within the supported contract |
 | Dolby Vision | Dolby Vision Adaptive HDR Mapping | Dolby Vision, TV-Led | Metadata-guided highlight expansion to the display profile |
 | Dolby Vision | HDR10 Rendering | HDR10 | Play Dolby Vision content in HDR10 without a manual TV profile |
+| Dolby Vision | HDR10 Raw FEL composition | HDR10 | Reconstruct BL+EL and output the composed PQ signal unmapped; the TV does all tone mapping |
 | Dolby Vision | LLDV Reference – HDR10 Output | HDR10 | Map to the display's peak, black floor and gamut with compatible L2 guidance |
 | Dolby Vision | LLDV Reference – Native | Dolby Vision, Low Latency | Use the display target from its Dolby Vision EDID |
 | Dolby Vision | HDR10+ Rendering | HDR10+ | Reconstruct the source and generate frame-associated statistics and representable luminance guidance |

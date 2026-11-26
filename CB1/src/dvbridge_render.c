@@ -1227,7 +1227,26 @@ static bool render_picture(struct dvbridge_renderer *r, const struct pl_frame *s
         paired && mapped.dovi.nlq_active)
         processing &= ~CB1_PROCESSING_COLOUR;
     struct pl_color_map_params color_map = pl_color_map_default_params;
-    if (session) {
+    if (session && session->raw) {
+        /* Composition only: output the reconstructed BL+EL signal unchanged.
+         * Identical source and target spaces make libplacebo skip color
+         * mapping; clip mappers keep any residual step an identity. */
+        params.cb1_nearest_identity = true;
+        params.cb1_stable_pq = true;
+        params.sigmoid_params = NULL;
+        target.color = image.color;
+        target.color.primaries = PL_COLOR_PRIM_BT_2020;
+        target.color.transfer = PL_COLOR_TRC_PQ;
+        color_map = pl_color_map_default_params;
+        color_map.gamut_mapping = &pl_gamut_map_clip;
+        color_map.tone_mapping_function = &pl_tone_map_clip;
+        color_map.metadata = PL_HDR_METADATA_NONE;
+        color_map.inverse_tone_mapping = false;
+        color_map.gamut_expansion = false;
+        color_map.visualize_lut = false;
+        color_map.show_clipping = false;
+        params.color_map_params = &color_map;
+    } else if (session) {
         params.cb1_nearest_identity = true;
         target.color = session->target;
         /* Pin the accepted Basic policy independently of upstream defaults. */
@@ -1638,7 +1657,8 @@ static bool render(struct dvbridge_renderer *r, const struct pl_frame *source,
     }
     struct active_mask mask={.rect={margins[0],margins[2],target_width-margins[1],target_height-margins[3]}};
     if(policy)memcpy(mask.rect,area,sizeof(area));
-    mask.maximum_pq=policy?cb1_hdr10_expert_ceiling(policy):dv_ideal_pq(session->target.hdr.max_luma);
+    mask.maximum_pq=policy?cb1_hdr10_expert_ceiling(policy):
+        session->raw?1.0f:dv_ideal_pq(session->target.hdr.max_luma);
     if(direct && direct->flip){float top=mask.rect[1];mask.rect[1]=target_height-mask.rect[3];mask.rect[3]=target_height-top;}
     const struct pl_hook blank={.stages=PL_HOOK_OUTPUT,.input=PL_HOOK_SIG_COLOR,
         .priv=&mask,.hook=mask_active_area,.signature=0x4342314853430001ULL};

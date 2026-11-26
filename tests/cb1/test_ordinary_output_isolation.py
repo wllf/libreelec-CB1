@@ -36,11 +36,12 @@ struct VideoPicture {
  StreamHdrType hdrType=StreamHdrType::HDR_TYPE_NONE; std::string strDVELType;
  bool doviEnhancement=false; int color_transfer=0;double pts=0;
 };
+constexpr int DVBRIDGE_MODE_HDR10_BASIC=2;
 namespace DVBRIDGE {
  enum class OutputMode {Disabled=2,Standard=0,HDR10=1,MasterReference=4,SDR=6}; enum class OutputRoute {Vanilla,NativeDV,HDR10,SDR,PlayerLed};
  enum class OutputReason {None,RestoreFailed,SourceIneligible,TVProfileRequired,ProcessingPending};
  enum class HDR10SourceMode {Native,ReferenceDV};
- struct Policy {int mode=0;struct {int gamut=0;}sdr;};
+ struct Policy {int mode=0;struct {int gamut=0;}sdr;bool hdr10_raw=false;};
  struct Preferences {OutputMode output=OutputMode::Standard; unsigned revision=1;bool allowMasterFallback=true,hdr10TransportFallback=false;
    double peak=1000;int panel=0,gamut=2;HDR10SourceMode hdr10Source=HDR10SourceMode::Native;
    ::DVBRIDGE::Policy Policy()const{return {};}};
@@ -122,7 +123,8 @@ struct CWinSystemGbmGLESContext : CWinSystemGbmEGLContext {
  std::mutex m_dvCapabilityMutex;
  unsigned m_dvAttemptFailures=0,m_hdr10SessionStream=0;
  uint64_t m_dvProfileLoggedRevision{},m_dvProfileLoggedStream{};
- std::optional<int> m_hdr10Session;
+ struct HDR10Session {bool raw=false;HDR10Session(int=0){}};
+ std::optional<HDR10Session> m_hdr10Session;
  struct {template<class... T> void Begin(T...){}} m_masterSafety;
  bool m_cb1RestoringPreferences=false;
  int ordinaryStages=0;

@@ -367,6 +367,17 @@ makeinstall_host() {
       -i ${SYSROOT_PREFIX}/usr/lib/kodi/cmake/KodiConfig.cmake
 }
 
+post_unpack() {
+  # The pinned CB1 Kodi fork skips the ordinary patch series; apply only
+  # this fork's local changes on top of it.
+  if [ "${PKG_SKIP_PATCHES}" = "yes" ]; then
+    for patch_file in "${PKG_DIR}"/cb1-patches/*.patch; do
+      [ -f "${patch_file}" ] || continue
+      patch --batch --forward --fuzz=0 -p1 -d "${PKG_BUILD}" < "${patch_file}"
+    done
+  fi
+}
+
 pre_configure_target() {
   # Keep source-location diagnostics useful without embedding build-host paths.
   export CFLAGS+=" -ffile-prefix-map=${ROOT}=/usr/src/libreelec"

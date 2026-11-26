@@ -1,0 +1,242 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 26 Nov 2026 18:21:37 +0000
+Subject: [PATCH] dvbridge: add raw FEL composition HDR10 output
+
+HDR10 Rendering always runs libplacebo's spline tone mapper and
+perceptual gamut mapper against the static L6/source-max target. Some
+displays should instead receive the reconstructed BL+EL picture
+untouched and do their own mapping, the way native HDR10 is handled.
+
+Add a raw variant of the Basic HDR10 session. It reuses the same
+validation, FEL pairing and transport, but renders into a target that
+is identical to the reconstructed source colour space with clip
+mappers, so no tone or gamut mapping runs and no post-scale ceiling
+is applied below PQ 1.0. Because the output is the source signal,
+L6 MaxCLL/MaxFALL and the mastering black level are carried as-is
+instead of being reported unknown.
+
+Selection is a policy flag on DVBRIDGE_MODE_HDR10_BASIC, so admission,
+link-depth and HDMI handling stay shared with Basic.
+---
+ config/owned-sources.json |  8 ++++----
+ src/dvbridge_placebo.c    | 28 +++++++++++++++++++++++++
+ src/dvbridge_placebo.h    |  8 ++++++++
+ src/dvbridge_policy.h     |  4 ++++
+ src/dvbridge_render.c     | 24 ++++++++++++++++++++--
+ tests/CMakeLists.txt      |  3 ++-
+ tests/hdr10_raw_policy.c  | 43 +++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 111 insertions(+), 7 deletions(-)
+ create mode 100644 tests/hdr10_raw_policy.c
+
+diff --git a/config/owned-sources.json b/config/owned-sources.json
+index 93f9c5d..6f36080 100644
+--- a/config/owned-sources.json
++++ b/config/owned-sources.json
+@@ -32,11 +32,11 @@
+   "src/dvbridge_creative.h": "bafac5fcd380a5a0e1d43ded66e59d291001bd7af5e18a7ed580fce9432d16d6",
+   "src/dvbridge_metadata.h": "c5ea1baabb5adff815565036a58d47d06bae6e06b62243763dae60af8646ac80",
+   "src/dvbridge_pack_sources.h.in": "167f03c10669f5ce95eb96373bab80fafaca165a13a5f1478c620d01158a907a",
+-  "src/dvbridge_placebo.c": "19e8505052309949789deb46e0a222d75cf9f68729dab47fd6647ed2448ecea7",
+-  "src/dvbridge_placebo.h": "1ae453d519231b702dcf128fa6a5c8347491485f746023bf5f7c8ef478ccfef4",
++  "src/dvbridge_placebo.c": "66a4b92753d910bae4735f8ea47a88b63b827a17a225bedf3cfd44412744f316",
++  "src/dvbridge_placebo.h": "3cbf0e761310c6d8b3d50d7292cd0053e67e5325052ea76ec58cccedfceb7afa",
+   "src/dvbridge_policy.c": "372986bc8bacd0cb68ca4af440a0b255e2954b1f357cfe84a3fbb9199b8b561d",
+-  "src/dvbridge_policy.h": "560dbfb112f687461ef9f394d867188724dbbd74135329876325fde4cc793392",
+-  "src/dvbridge_render.c": "3f8c8849b8e6a23088683170ac638e9b30175a38dda78e0d1b7404412bbbb987",
++  "src/dvbridge_policy.h": "f6908fcf5c19494a6a3e1aea91665b936c0e203485dd0f5ac847535c68da8b4a",
++  "src/dvbridge_render.c": "dbca115a77589f69bf39587fcc63709526add0e0762a32e4d29949aa7494e97f",
+   "src/dvbridge_fel_seek.h": "bdc2944c719f354c4189fd4411e6c5ffe94d1afc4f500d3f5708fce34d12ec58",
+   "src/dvbridge_render.h": "c26b48281a291026c766e40aef651482dd18dcd6fd008b33bf85fe7c9e8e1c85",
+   "src/dvbridge_gl_frame.c": "6cbcb4b4c0427ca8196dbd4821aa6a771594fe6388c7adfcacd937e45da27c66",
+diff --git a/src/dvbridge_placebo.c b/src/dvbridge_placebo.c
+index eccd9f0..0e68bb0 100644
+--- a/src/dvbridge_placebo.c
++++ b/src/dvbridge_placebo.c
+@@ -64,6 +64,34 @@ bool dvbridge_hdr10_session_init(struct dvbridge_hdr10_session *out,
+     return true;
+ }
+ 
++bool dvbridge_hdr10_raw_session_init(struct dvbridge_hdr10_session *out,
++                                     const void *metadata, size_t bytes)
++{
++    struct dvbridge_hdr10_session candidate = {0};
++    if (!out || !dvbridge_hdr10_session_init(&candidate, metadata, bytes))
++        return false;
++    const AVDOVIColorMetadata *color = av_dovi_get_color(metadata);
++    const AVDOVIDmData *l6 = av_dovi_find_level(metadata, 6);
++    float black = color->source_min_pq <= 4095 ?
++        pl_hdr_rescale(PL_HDR_PQ, PL_HDR_NITS, color->source_min_pq / 4095.0f) : 0;
++    if (candidate.output.level6) {
++        black = l6->l6.min_luminance / 10000.0f;
++        /* Unmapped output keeps the source light levels, so they stay valid. */
++        if (l6->l6.max_cll <= 10000 && l6->l6.max_fall <= l6->l6.max_cll) {
++            candidate.output.max_cll = l6->l6.max_cll;
++            candidate.output.max_fall = l6->l6.max_fall;
++        }
++    }
++    if (!isfinite(black) || black < 0 || black >= candidate.target.hdr.max_luma)
++        black = 0;
++    candidate.target.hdr.min_luma = black > PL_COLOR_HDR_BLACK ? black : PL_COLOR_HDR_BLACK;
++    candidate.target.hdr.prim = *pl_raw_primaries_get(PL_COLOR_PRIM_BT_2020);
++    candidate.output.min_luminance = (unsigned)lroundf(black * 10000.0f);
++    candidate.raw = true;
++    *out = candidate;
++    return true;
++}
++
+ bool dvbridge_map_color(struct dvbridge_color *out, const void *metadata,
+                        size_t bytes, bool enhancement_layer_paired)
+ {
+diff --git a/src/dvbridge_placebo.h b/src/dvbridge_placebo.h
+index 8d4797e..405b6db 100644
+--- a/src/dvbridge_placebo.h
++++ b/src/dvbridge_placebo.h
+@@ -35,11 +35,19 @@ struct dvbridge_hdr10_metadata {
+ struct dvbridge_hdr10_session {
+     struct pl_color_space target;
+     struct dvbridge_hdr10_metadata output;
++    /* Raw composition: target is the reconstructed source itself, so the
++     * renderer performs no tone or gamut mapping. Output carries L6 as-is. */
++    bool raw;
+ };
+ /* Construct a stream target and signal together; failure leaves out unchanged.
+  * Required enhancement-layer pairing is checked when the picture is rendered. */
+ bool dvbridge_hdr10_session_init(struct dvbridge_hdr10_session *out,
+                                  const void *metadata, size_t bytes);
++#define DVBRIDGE_HDR10_RAW_API 1
++/* As dvbridge_hdr10_session_init, but for the unmapped BL+EL composition.
++ * MaxCLL/MaxFALL and mastering black come from L6 when it is present. */
++bool dvbridge_hdr10_raw_session_init(struct dvbridge_hdr10_session *out,
++                                     const void *metadata, size_t bytes);
+ bool dvbridge_get_hdr10_metadata(struct dvbridge_hdr10_metadata *out,
+                                 const void *metadata, size_t bytes);
+ /* Build a static PQ target in nits; dynamic L1 remains on the source only. */
+diff --git a/src/dvbridge_policy.h b/src/dvbridge_policy.h
+index 4d72633..bf518f9 100644
+--- a/src/dvbridge_policy.h
++++ b/src/dvbridge_policy.h
+@@ -52,7 +52,11 @@ struct dvbridge_policy {
+     uint64_t lldv_edid_generation;
+     unsigned lldv_edid_version;
+     double lldv_primaries[6];
++    /* HDR10 Basic only: compose BL+EL and output it without tone or gamut
++     * mapping (dvbridge_hdr10_raw_session_init). Other modes ignore it. */
++    bool hdr10_raw;
+ };
++#define DVBRIDGE_HDR10_RAW_POLICY_API 1
+ struct dvbridge_identity { uint64_t stream, picture, revision; };
+ enum dvbridge_policy_status {
+     DVBRIDGE_POLICY_VALID, DVBRIDGE_POLICY_INVALID_VALUE, DVBRIDGE_POLICY_TV_PROFILE_REQUIRED
+diff --git a/src/dvbridge_render.c b/src/dvbridge_render.c
+index 143e34f..8492660 100644
+--- a/src/dvbridge_render.c
++++ b/src/dvbridge_render.c
+@@ -1233,7 +1233,26 @@ static bool render_picture(struct dvbridge_renderer *r, const struct pl_frame *s
+         paired && mapped.dovi.nlq_active)
+         processing &= ~CB1_PROCESSING_COLOUR;
+     struct pl_color_map_params color_map = pl_color_map_default_params;
+-    if (session) {
++    if (session && session->raw) {
++        /* Composition only: output the reconstructed BL+EL signal unchanged.
++         * Identical source and target spaces make libplacebo skip color
++         * mapping; clip mappers keep any residual step an identity. */
++        params.cb1_nearest_identity = true;
++        params.cb1_stable_pq = true;
++        params.sigmoid_params = NULL;
++        target.color = image.color;
++        target.color.primaries = PL_COLOR_PRIM_BT_2020;
++        target.color.transfer = PL_COLOR_TRC_PQ;
++        color_map = pl_color_map_default_params;
++        color_map.gamut_mapping = &pl_gamut_map_clip;
++        color_map.tone_mapping_function = &pl_tone_map_clip;
++        color_map.metadata = PL_HDR_METADATA_NONE;
++        color_map.inverse_tone_mapping = false;
++        color_map.gamut_expansion = false;
++        color_map.visualize_lut = false;
++        color_map.show_clipping = false;
++        params.color_map_params = &color_map;
++    } else if (session) {
+         params.cb1_nearest_identity = true;
+         target.color = session->target;
+         /* Pin the accepted Basic policy independently of upstream defaults. */
+@@ -1644,7 +1663,8 @@ static bool render(struct dvbridge_renderer *r, const struct pl_frame *source,
+     }
+     struct active_mask mask={.rect={margins[0],margins[2],target_width-margins[1],target_height-margins[3]}};
+     if(policy)memcpy(mask.rect,area,sizeof(area));
+-    mask.maximum_pq=policy?cb1_hdr10_expert_ceiling(policy):dv_ideal_pq(session->target.hdr.max_luma);
++    mask.maximum_pq=policy?cb1_hdr10_expert_ceiling(policy):
++        session->raw?1.0f:dv_ideal_pq(session->target.hdr.max_luma);
+     if(direct && direct->flip){float top=mask.rect[1];mask.rect[1]=target_height-mask.rect[3];mask.rect[3]=target_height-top;}
+     const struct pl_hook blank={.stages=PL_HOOK_OUTPUT,.input=PL_HOOK_SIG_COLOR,
+         .priv=&mask,.hook=mask_active_area,.signature=0x4342314853430001ULL};
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 45aaacf..25187d3 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -208,7 +208,7 @@ target_link_options(${target} PRIVATE -Wl,--wrap=avcodec_open2 -Wl,--wrap=avcode
+                                      -Wl,--wrap=avcodec_get_hw_frames_parameters -Wl,--wrap=av_hwframe_ctx_init)
+ set_tests_properties(${target} PROPERTIES SKIP_RETURN_CODE 77)
+ endforeach()
+-foreach(name task3_basic basic_policy basic_render frozen_reference)
++foreach(name task3_basic basic_policy hdr10_raw_policy basic_render frozen_reference)
+   add_executable(${name} ${name}.c)
+   target_link_libraries(${name} PRIVATE dvbridge_core)
+ endforeach()
+@@ -220,6 +220,7 @@ endforeach()
+ foreach(mode precedence malformed)
+   add_test(NAME basic_policy_${mode} COMMAND basic_policy ${mode})
+ endforeach()
++add_test(NAME hdr10_raw_policy COMMAND hdr10_raw_policy)
+ foreach(mode latch mapping joined rejection)
+   add_test(NAME basic_render_${mode} COMMAND basic_render ${mode})
+ endforeach()
+diff --git a/tests/hdr10_raw_policy.c b/tests/hdr10_raw_policy.c
+new file mode 100644
+index 0000000..fc8bc8e
+--- /dev/null
++++ b/tests/hdr10_raw_policy.c
+@@ -0,0 +1,43 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later */
++#include "dvbridge_placebo.h"
++#include "task3_fixture.h"
++#include <math.h>
++#include <stdio.h>
++#include <string.h>
++
++int main(void)
++{
++    size_t bytes;
++    AVDOVIMetadata *m = task3_fixture(&bytes);
++    m->num_ext_blocks = 1;
++    AVDOVIDmData *l6 = av_dovi_get_ext(m, 0);
++    l6->level = 6; l6->l6.max_luminance = 4000; l6->l6.min_luminance = 50;
++    l6->l6.max_cll = 3500; l6->l6.max_fall = 400;
++    struct dvbridge_hdr10_session basic, raw;
++    assert(dvbridge_hdr10_session_init(&basic, m, bytes) && !basic.raw);
++    assert(dvbridge_hdr10_raw_session_init(&raw, m, bytes) && raw.raw);
++    /* Same static target peak as Basic, but source light levels survive. */
++    assert(raw.target.hdr.max_luma == 4000.0f && raw.output.max_luminance == 4000);
++    assert(raw.output.level6 && raw.output.max_cll == 3500 && raw.output.max_fall == 400);
++    assert(raw.output.min_luminance == 50 && fabsf(raw.target.hdr.min_luma - 0.005f) < 1e-6f);
++    assert(raw.target.primaries == PL_COLOR_PRIM_BT_2020 && raw.target.transfer == PL_COLOR_TRC_PQ);
++    /* Inconsistent light levels are reported unknown, not invented. */
++    l6->l6.max_fall = 3600;
++    assert(dvbridge_hdr10_raw_session_init(&raw, m, bytes));
++    assert(!raw.output.max_cll && !raw.output.max_fall);
++    /* Without L6, the RPU source range supplies the mastering envelope. */
++    m->num_ext_blocks = 0;
++    av_dovi_get_color(m)->source_max_pq = 3079;
++    av_dovi_get_color(m)->source_min_pq = 62;
++    assert(dvbridge_hdr10_raw_session_init(&raw, m, bytes) && !raw.output.level6);
++    assert(fabsf(raw.target.hdr.max_luma - 1000) < 2 && !raw.output.max_cll);
++    assert(raw.output.min_luminance > 0 && raw.target.hdr.min_luma < 0.01f);
++    /* Failure is atomic, exactly as for Basic. */
++    av_dovi_get_color(m)->source_max_pq = 0;
++    struct dvbridge_hdr10_session before = raw;
++    assert(!dvbridge_hdr10_raw_session_init(&raw, m, bytes));
++    assert(!memcmp(&before, &raw, sizeof(raw)));
++    assert(!dvbridge_hdr10_raw_session_init(NULL, m, bytes));
++    av_free(m);
++    puts("PASS: raw HDR10 session keeps source L6 light levels and mastering range");
++}

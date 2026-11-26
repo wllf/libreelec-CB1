@@ -1,0 +1,200 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 26 Nov 2026 18:21:48 +0000
+Subject: [PATCH] CB1: add HDR10 Raw FEL composition playback mode
+
+Offer a fourth HDR10 method for Dolby Vision sources. It reconstructs
+the picture exactly like HDR10 Rendering, including the FEL residual,
+but asks the engine for its raw session: no tone mapping, no gamut
+mapping, and static HDR10 metadata copied from the RPU L6 block.
+
+The mode reuses HDR10 Basic admission and HDMI handling. Switching
+between Basic and Raw during playback rebuilds the HDR10 session, since
+both share one engine mode and the session would otherwise be reused.
+---
+ .../resource.language.en_gb/resources/strings.po  |  4 ++++
+ system/settings/settings.xml                      |  2 +-
+ .../DVDCodecs/Video/DVOutputSettings.h            |  4 +++-
+ .../VideoPlayer/VideoRenderers/DVBridgeGLES.cpp   |  3 ++-
+ xbmc/dialogs/DVPlaybackModes.cpp                  |  2 +-
+ xbmc/settings/SettingConditions.cpp               |  4 ++--
+ xbmc/windowing/gbm/WinSystemGbmGLContext.cpp      | 15 +++++++++++----
+ xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp    | 15 +++++++++++----
+ 8 files changed, 35 insertions(+), 14 deletions(-)
+
+diff --git a/addons/resource.language.en_gb/resources/strings.po b/addons/resource.language.en_gb/resources/strings.po
+index f8bbdd4..dddb980 100644
+--- a/addons/resource.language.en_gb/resources/strings.po
++++ b/addons/resource.language.en_gb/resources/strings.po
+@@ -27074,3 +27074,7 @@ msgstr ""
+ msgctxt "#41506"
+ msgid "This display requires LLDV. Select LLDV Reference."
+ msgstr ""
++
++msgctxt "#41507"
++msgid "HDR10 : Raw FEL composition"
++msgstr ""
+diff --git a/system/settings/settings.xml b/system/settings/settings.xml
+index ae392a0..398d1ac 100755
+--- a/system/settings/settings.xml
++++ b/system/settings/settings.xml
+@@ -132,7 +132,7 @@
+           <requirement>HAVE_DVBRIDGE</requirement>
+           <level>2</level><default>0</default><visible>false</visible>
+           <constraints><options>
+-            <option label="40822">0</option><option label="40823">1</option><option label="40922">2</option>
++            <option label="40822">0</option><option label="40823">1</option><option label="40922">2</option><option label="41507">3</option>
+           </options></constraints>
+           <control type="list" format="string"><usedetails>true</usedetails></control>
+         </setting>
+diff --git a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVOutputSettings.h b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVOutputSettings.h
+index c3b7fe9..d8f11ce 100644
+--- a/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVOutputSettings.h
++++ b/xbmc/cores/VideoPlayer/DVDCodecs/Video/DVOutputSettings.h
+@@ -166,6 +166,8 @@ struct OutputPreferences
+       case OutputMode::HDR10:
+         result.mode = method == 2 ? DVBRIDGE_MODE_HDR10PLUS :
+             method == 1 ? DVBRIDGE_MODE_HDR10_EXPERT : DVBRIDGE_MODE_HDR10_BASIC;
++        // Raw shares Basic admission and transport; only the mapping differs.
++        result.hdr10_raw = method == 3;
+         break;
+     }
+     // Basic/native paths never consume calibration. Keep invalid user values
+@@ -240,7 +242,7 @@ inline OutputSelectors ReadDefaultOutputSelectors()
+   result.output=output==3 ? OutputMode::AdaptiveB :
+       output>=0 && output<=static_cast<int>(OutputMode::PlayerLed) ? static_cast<OutputMode>(output) : OutputMode::Standard;
+   const int method=settings->GetInt("dvbridge.hdr10method");
+-  result.method=method>=0 && method<=2 ? method : 0;
++  result.method=method>=0 && method<=3 ? method : 0;
+   const int hdr10=settings->GetInt("dvbridge.hdr10source");
+   result.hdr10Source=(hdr10>=0 && hdr10<=2) || hdr10==4 ?
+       static_cast<HDR10SourceMode>(hdr10) : HDR10SourceMode::Native;
+diff --git a/xbmc/cores/VideoPlayer/VideoRenderers/DVBridgeGLES.cpp b/xbmc/cores/VideoPlayer/VideoRenderers/DVBridgeGLES.cpp
+index 485731d..21cd7b7 100644
+--- a/xbmc/cores/VideoPlayer/VideoRenderers/DVBridgeGLES.cpp
++++ b/xbmc/cores/VideoPlayer/VideoRenderers/DVBridgeGLES.cpp
+@@ -1888,7 +1888,8 @@ bool CDVBridgeGLES::SetHDR10Session(const dvbridge_hdr10_session& session, uint6
+   if (m_prepared || m_pending)
+     return false;
+   m_hdr10Limited = limited;
+-  if (m_hdr10Session && stream && stream == m_hdr10SessionStream)
++  if (m_hdr10Session && stream && stream == m_hdr10SessionStream &&
++      m_hdr10Session->raw == session.raw)
+     return true;
+   if (m_hdr10Session && !stream)
+     return false;
+diff --git a/xbmc/dialogs/DVPlaybackModes.cpp b/xbmc/dialogs/DVPlaybackModes.cpp
+index 1497ec3..a4a593a 100644
+--- a/xbmc/dialogs/DVPlaybackModes.cpp
++++ b/xbmc/dialogs/DVPlaybackModes.cpp
+@@ -46,7 +46,7 @@ bool ShowLldvFormatMenu(bool forCircuit = false, bool inPlayback = false);
+ struct Choice { int output,method,label; };
+ constexpr Choice dvChoices[]={{4,0,40913},{0,0,40812},
+     {5,0,40914},
+-    {2,0,40814},{1,0,40822},{1,1,40823},{1,2,40922},{6,0,41130},{7,0,41221}};
++    {2,0,40814},{1,0,40822},{1,1,40823},{1,2,40922},{6,0,41130},{7,0,41221},{1,3,41507}};
+ }
+ 
+ CDVPlaybackModes& CDVPlaybackModes::GetInstance()
+diff --git a/xbmc/settings/SettingConditions.cpp b/xbmc/settings/SettingConditions.cpp
+index 7992687..111e90c 100644
+--- a/xbmc/settings/SettingConditions.cpp
++++ b/xbmc/settings/SettingConditions.cpp
+@@ -574,7 +574,7 @@ void CSettingConditions::DVOutputOptions(const std::shared_ptr<const CSetting>&
+   const bool pendingHDR10Plus=nativeHDR10Plus && !caps.sourceKnown && !data.transaction.identity.Valid();
+   const auto& processing=(hdr10Source || hlgSource) && !caps.sourceKnown ? caps.hdr10Processing : caps.processing;
+   constexpr int menuModes[]{5,1,
+-      4,0,2,3,6,7,8};
++      4,0,2,3,6,7,8,2};
+ #ifdef CB1_HAS_HDR10_AI
+   constexpr int hdr10MenuModes[]{1,4,0,7};
+   constexpr int hdr10PlusMenuModes[]{1,0,0,7};
+@@ -596,7 +596,7 @@ void CSettingConditions::DVOutputOptions(const std::shared_ptr<const CSetting>&
+         hdr10Menu ? (option.value>=0 && option.value<int(std::size(hdr10MenuModes)) ? hdr10MenuModes[option.value] : 0) :
+         hdr10Source ? (option.value==1 || option.value==3 ? 1 : option.value==2 ? 4 : option.value==4 ? 7 : 0) :
+         (menu || playback) ? (option.value>=0 && option.value<int(std::size(menuModes)) ? menuModes[option.value] : 0) :
+-        method ? (option.value==0 ? 2 : option.value==1 ? 3 : option.value==2 ? 6 : 0) :
++        method ? (option.value==0 || option.value==3 ? 2 : option.value==1 ? 3 : option.value==2 ? 6 : 0) :
+         (option.value==0 ? 1 : option.value==1 ? 2 : option.value==3 || option.value==5 ? 4 : option.value==4 ? 5 : option.value==6 ? 7 : option.value==7 ? 8 : 0);
+     auto reason=DVBRIDGE::OutputReason::None;
+     const bool guided = hdr10PlusSource && (hdr10PlusMenu ? option.value==0 : option.value==3);
+diff --git a/xbmc/windowing/gbm/WinSystemGbmGLContext.cpp b/xbmc/windowing/gbm/WinSystemGbmGLContext.cpp
+index dd6eba8..10eda30 100644
+--- a/xbmc/windowing/gbm/WinSystemGbmGLContext.cpp
++++ b/xbmc/windowing/gbm/WinSystemGbmGLContext.cpp
+@@ -2791,8 +2791,12 @@ bool CWinSystemGbmGLContext::ConfigureHDR10Conversion(const VideoPicture& pictur
+   if (m_failedHDR10SetupRestore && !EndDVBridge())
+     return false;
+   dvbridge_hdr10_session session{};
+-  if (m_hdr10Session && m_hdr10SessionStream == stream) session = *m_hdr10Session;
+-  else if (!dvbridge_hdr10_session_init(&session, picture.doviMetadata.Data(), picture.doviMetadata.Size()))
++  const bool raw = m_dvSelection.policy.mode == DVBRIDGE_MODE_HDR10_BASIC &&
++      m_dvSelection.policy.hdr10_raw;
++  if (m_hdr10Session && m_hdr10SessionStream == stream && m_hdr10Session->raw == raw)
++    session = *m_hdr10Session;
++  else if (!(raw ? dvbridge_hdr10_raw_session_init(&session, picture.doviMetadata.Data(), picture.doviMetadata.Size()) :
++                   dvbridge_hdr10_session_init(&session, picture.doviMetadata.Data(), picture.doviMetadata.Size())))
+     return false;
+   auto atomic = std::dynamic_pointer_cast<CDRMAtomic>(m_DRM);
+   if (m_dvState.Captured() && (!atomic || !m_dvState.Stage(*atomic,true))) return false;
+@@ -2863,7 +2867,8 @@ bool CWinSystemGbmGLContext::ConfigureHDR10Conversion(const VideoPicture& pictur
+           GetOutputBitDepth(), UseLimitedColor() ? "limited" : "full");
+     else
+       DVBRIDGE::DiagnosticLog(LOGINFO, "DVBridge HDR10 configured: policy={} signal_target={} nits origin={} framebuffer_bits={} range={}",
+-          m_dvSelection.policy.mode == DVBRIDGE_MODE_HDR10_EXPERT ? "Expert" : "Basic",
++          m_dvSelection.policy.mode == DVBRIDGE_MODE_HDR10_EXPERT ? "Expert" :
++              session.raw ? "Raw" : "Basic",
+         session.target.hdr.max_luma, session.output.level6 ? "RPU-L6" : "RPU-source-PQ",
+         GetOutputBitDepth(), UseLimitedColor() ? "limited" : "full");
+     if (m_hdrDeepColorPrevious)
+@@ -3340,7 +3345,9 @@ bool CWinSystemGbmGLContext::PrepareDVOutputFrame(const VideoPicture& picture)
+   if (!PollRejectedDVSurface()) return deferred("output-await-rejected-scanout");
+   // A format match cannot carry a fixed target across original source streams.
+   if (m_dvSelection.route == DVBRIDGE::OutputRoute::HDR10 && m_hdrConversion &&
+-      m_hdr10Session && m_hdr10SessionStream != picture.doviMetadata.Binding().stream)
++      m_hdr10Session && (m_hdr10SessionStream != picture.doviMetadata.Binding().stream ||
++      m_hdr10Session->raw != (m_dvSelection.policy.mode == DVBRIDGE_MODE_HDR10_BASIC &&
++                              m_dvSelection.policy.hdr10_raw)))
+     return ConfigureHDR10Conversion(picture);
+   if (m_dvSelection.reason == DVBRIDGE::OutputReason::TVProfileRequired)
+   {
+diff --git a/xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp b/xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp
+index b0bb6d9..9ed9a01 100644
+--- a/xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp
++++ b/xbmc/windowing/gbm/WinSystemGbmGLESContext.cpp
+@@ -2785,8 +2785,12 @@ bool CWinSystemGbmGLESContext::ConfigureHDR10Conversion(const VideoPicture& pict
+   if (m_failedHDR10SetupRestore && !EndDVBridge())
+     return false;
+   dvbridge_hdr10_session session{};
+-  if (m_hdr10Session && m_hdr10SessionStream == stream) session = *m_hdr10Session;
+-  else if (!dvbridge_hdr10_session_init(&session, picture.doviMetadata.Data(), picture.doviMetadata.Size()))
++  const bool raw = m_dvSelection.policy.mode == DVBRIDGE_MODE_HDR10_BASIC &&
++      m_dvSelection.policy.hdr10_raw;
++  if (m_hdr10Session && m_hdr10SessionStream == stream && m_hdr10Session->raw == raw)
++    session = *m_hdr10Session;
++  else if (!(raw ? dvbridge_hdr10_raw_session_init(&session, picture.doviMetadata.Data(), picture.doviMetadata.Size()) :
++                   dvbridge_hdr10_session_init(&session, picture.doviMetadata.Data(), picture.doviMetadata.Size())))
+     return false;
+   auto atomic = std::dynamic_pointer_cast<CDRMAtomic>(m_DRM);
+   if (m_dvState.Captured() && (!atomic || !m_dvState.Stage(*atomic,true))) return false;
+@@ -2857,7 +2861,8 @@ bool CWinSystemGbmGLESContext::ConfigureHDR10Conversion(const VideoPicture& pict
+           GetOutputBitDepth(), UseLimitedColor() ? "limited" : "full");
+     else
+       DVBRIDGE::DiagnosticLog(LOGINFO, "DVBridge HDR10 configured: policy={} signal_target={} nits origin={} framebuffer_bits={} range={}",
+-          m_dvSelection.policy.mode == DVBRIDGE_MODE_HDR10_EXPERT ? "Expert" : "Basic",
++          m_dvSelection.policy.mode == DVBRIDGE_MODE_HDR10_EXPERT ? "Expert" :
++              session.raw ? "Raw" : "Basic",
+         session.target.hdr.max_luma, session.output.level6 ? "RPU-L6" : "RPU-source-PQ",
+         GetOutputBitDepth(), UseLimitedColor() ? "limited" : "full");
+     if (m_hdrDeepColorPrevious)
+@@ -3334,7 +3339,9 @@ bool CWinSystemGbmGLESContext::PrepareDVOutputFrame(const VideoPicture& picture)
+   if (!PollRejectedDVSurface()) return deferred("output-await-rejected-scanout");
+   // A format match cannot carry a fixed target across original source streams.
+   if (m_dvSelection.route == DVBRIDGE::OutputRoute::HDR10 && m_hdrConversion &&
+-      m_hdr10Session && m_hdr10SessionStream != picture.doviMetadata.Binding().stream)
++      m_hdr10Session && (m_hdr10SessionStream != picture.doviMetadata.Binding().stream ||
++      m_hdr10Session->raw != (m_dvSelection.policy.mode == DVBRIDGE_MODE_HDR10_BASIC &&
++                              m_dvSelection.policy.hdr10_raw)))
+     return ConfigureHDR10Conversion(picture);
+   if (m_dvSelection.reason == DVBRIDGE::OutputReason::TVProfileRequired)
+   {

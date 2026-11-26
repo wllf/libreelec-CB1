@@ -35,11 +35,19 @@ struct dvbridge_hdr10_metadata {
 struct dvbridge_hdr10_session {
     struct pl_color_space target;
     struct dvbridge_hdr10_metadata output;
+    /* Raw composition: target is the reconstructed source itself, so the
+     * renderer performs no tone or gamut mapping. Output carries L6 as-is. */
+    bool raw;
 };
 /* Construct a stream target and signal together; failure leaves out unchanged.
  * Required enhancement-layer pairing is checked when the picture is rendered. */
 bool dvbridge_hdr10_session_init(struct dvbridge_hdr10_session *out,
                                  const void *metadata, size_t bytes);
+#define DVBRIDGE_HDR10_RAW_API 1
+/* As dvbridge_hdr10_session_init, but for the unmapped BL+EL composition.
+ * MaxCLL/MaxFALL and mastering black come from L6 when it is present. */
+bool dvbridge_hdr10_raw_session_init(struct dvbridge_hdr10_session *out,
+                                     const void *metadata, size_t bytes);
 bool dvbridge_get_hdr10_metadata(struct dvbridge_hdr10_metadata *out,
                                 const void *metadata, size_t bytes);
 /* Build a static PQ target in nits; dynamic L1 remains on the source only. */
